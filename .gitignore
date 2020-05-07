@@ -6,3 +6,5 @@ videos/
 runs/
 _vizdoom/
 _vizdoom.ini
+.ipynb_checkpoints/
+env/
