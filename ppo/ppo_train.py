@@ -5,6 +5,7 @@ import os
 import random
 import gym
 import numpy as np
+import json
 
 # Follow instructions here to install https://github.com/openai/roboschool
 import roboschool
@@ -20,27 +21,52 @@ from lib.common import mkdir
 from lib.model import ActorCritic
 from lib.multiprocessing_env import SubprocVecEnv
 
-NUM_ENVS            = 8 
-ENV_ID              = "RoboschoolHalfCheetah-v1"
-HIDDEN_SIZE         = 256
-LEARNING_RATE       = 1e-4
-GAMMA               = 0.99
-GAE_LAMBDA          = 0.95
-PPO_EPSILON         = 0.2
-CRITIC_DISCOUNT     = 0.5
-ENTROPY_BETA        = 0.001
-PPO_STEPS           = 256
-MINI_BATCH_SIZE     = 64
-PPO_EPOCHS          = 10
-TEST_EPOCHS         = 10
-NUM_TESTS           = 10
-TARGET_REWARD       = 2500
+def setup(env_id):
 
+    with open(os.path.join('conf', env_id + '.json'), 'r+') as json_file: #open read and overwrite.
+        
+        data = json.load(json_file)
 
-def make_env():
+        global ENV_ID
+        global NUM_ENVS            
+        global HIDDEN_SIZE         
+        global LEARNING_RATE       
+        global GAMMA               
+        global GAE_LAMBDA          
+        global PPO_EPSILON         
+        global CRITIC_DISCOUNT     
+        global ENTROPY_BETA        
+        global PPO_STEPS           
+        global MINI_BATCH_SIZE     
+        global PPO_EPOCHS          
+        global TEST_EPOCHS         
+        global NUM_TESTS           
+        global TARGET_REWARD       
+
+        ENV_ID              = data.setdefault('env_id', 'RoboschoolHalfCheetah-v1')
+        NUM_ENVS            = data.setdefault('num_envs', 1)
+        HIDDEN_SIZE         = data.setdefault('hidden_size', 256)
+        LEARNING_RATE       = data.setdefault('learning_rate', 1e-4)
+        GAMMA               = data.setdefault('gamma', 0.99)
+        GAE_LAMBDA          = data.setdefault('gae_lambda', 0.95)
+        PPO_EPSILON         = data.setdefault('ppo_epsilon', 0.2)
+        CRITIC_DISCOUNT     = data.setdefault('critic_discount', 0.5)
+        ENTROPY_BETA        = data.setdefault('entropy_beta', 0.00)
+        PPO_STEPS           = data.setdefault('ppo_steps', 256)
+        MINI_BATCH_SIZE     = data.setdefault('mini_batch_size', 64)
+        PPO_EPOCHS          = data.setdefault('ppo_epochs', 10)
+        TEST_EPOCHS         = data.setdefault('test_epochs', 10)
+        NUM_TESTS           = data.setdefault('num_tests', 10)
+        TARGET_REWARD       = data.setdefault('target_reward', 2500)
+
+        json_file.seek(0) #go to beggining of file
+        json.dump(data, json_file) #write content
+        json_file.truncate() #clear any tail of old content
+
+def make_env(env_id):
     # returns a function which creates a single environment
     def _thunk():
-        env = gym.make(ENV_ID)
+        env = gym.make(env_id)
         return env
     return _thunk
 
@@ -66,13 +92,13 @@ def normalize(x):
     return x
 
 
-def compute_gae(next_value, rewards, masks, values, gamma=GAMMA, lam=GAE_LAMBDA):
+def compute_gae(next_value, rewards, masks, values):
     values = values + [next_value]
     gae = 0
     returns = []
     for step in reversed(range(len(rewards))):
-        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
-        gae = delta + gamma * lam * masks[step] * gae
+        delta = rewards[step] + GAMMA * values[step + 1] * masks[step] - values[step]
+        gae = delta + GAMMA * GAE_LAMBDA * masks[step] * gae
         # prepend to get correct order back
         returns.insert(0, gae + values[step])
     return returns
@@ -137,9 +163,12 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
 if __name__ == "__main__":
     mkdir('.', 'checkpoints')
     parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--name", default=ENV_ID, help="Name of the run")
+    parser.add_argument("-e", "--env", default="RoboschoolHalfCheetah-v1", help="Name of the environment")
     args = parser.parse_args()
-    writer = SummaryWriter(comment="ppo_" + args.name)
+    # Setup all constant
+    setup(args.env)
+    
+    writer = SummaryWriter(comment="ppo_" + ENV_ID)
     
     # Autodetect CUDA
     use_cuda = torch.cuda.is_available()
@@ -147,7 +176,7 @@ if __name__ == "__main__":
     print('Device:', device)
     
     # Prepare environments
-    envs = [make_env() for i in range(NUM_ENVS)]
+    envs = [make_env(ENV_ID) for i in range(NUM_ENVS)]
     envs = SubprocVecEnv(envs)
     env = gym.make(ENV_ID)
     num_inputs  = envs.observation_space.shape[0]
@@ -216,7 +245,7 @@ if __name__ == "__main__":
             if best_reward is None or best_reward < test_reward:
                 if best_reward is not None:
                     print("Best reward updated: %.3f -> %.3f" % (best_reward, test_reward))
-                    name = "%s_best_%+.3f_%d.dat" % (args.name, test_reward, frame_idx)
+                    name = "%s_best_%+.3f_%d.dat" % (ENV_ID, test_reward, frame_idx)
                     fname = os.path.join('.', 'checkpoints', name)
                     torch.save(model.state_dict(), fname)
                 best_reward = test_reward
