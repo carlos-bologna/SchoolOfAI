@@ -1,11 +1,16 @@
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
+import torch.nn.functional as F
+from torch.distributions import Normal, Categorical
+import numpy as np
 
 class ActorCritic(nn.Module):
-    def __init__(self, num_inputs, num_outputs, hidden_size, std=0.0):
+    def __init__(self, num_inputs, num_outputs, **kwargs):
         super(ActorCritic, self).__init__()
         
+        hidden_size = kwargs.get('hidden_size')
+        std         = kwargs.get('std', 0.0)
+
         self.critic = nn.Sequential(
             nn.Linear(num_inputs, hidden_size),
             nn.ReLU(),
@@ -26,10 +31,15 @@ class ActorCritic(nn.Module):
         dist  = Normal(mu, std)
         return dist, value
 
-class A3Clstm(nn.Module):
-    def __init__(self, num_inputs, action_space):
-        super(A3Clstm, self).__init__()
-        self.conv1 = nn.Conv2d(num_inputs, 32, 5, stride=1, padding=2)
+class ActorCriticLSTM(nn.Module):
+    def __init__(self, num_inputs, num_outputs, **kwargs):
+        super(ActorCriticLSTM, self).__init__()
+
+        self.channels_first = kwargs.get('channels_first', False)
+        
+        in_channels = num_inputs[0] if self.channels_first else num_inputs[2]
+
+        self.conv1 = nn.Conv2d(in_channels, 32, 5, stride=1, padding=2)
         self.maxp1 = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(32, 32, 5, stride=1, padding=1)
         self.maxp2 = nn.MaxPool2d(2, 2)
@@ -38,10 +48,13 @@ class A3Clstm(nn.Module):
         self.conv4 = nn.Conv2d(64, 64, 3, stride=1, padding=1)
         self.maxp4 = nn.MaxPool2d(2, 2)
 
-        self.lstm = nn.LSTMCell(1024, 512)
-        num_outputs = action_space.n
+        #self.lstm = nn.LSTMCell(1024, 512)
+        self.lstm = nn.LSTMCell(6912, 512)
+        
         self.critic_linear = nn.Linear(512, 1)
         self.actor_linear = nn.Linear(512, num_outputs)
+
+        self.logsoftmax = nn.LogSoftmax(dim=1)
 
         self.apply(weights_init)
         relu_gain = nn.init.calculate_gain('relu')
@@ -62,7 +75,10 @@ class A3Clstm(nn.Module):
         self.train()
 
     def forward(self, inputs):
-        inputs, (hx, cx) = inputs
+
+        if not self.channels_first:
+            inputs = inputs.permute(0,3,1,2) #make channel as first position (after batch)
+        
         x = F.relu(self.maxp1(self.conv1(inputs)))
         x = F.relu(self.maxp2(self.conv2(x)))
         x = F.relu(self.maxp3(self.conv3(x)))
@@ -70,8 +86,36 @@ class A3Clstm(nn.Module):
 
         x = x.view(x.size(0), -1)
 
-        hx, cx = self.lstm(x, (hx, cx))
+        hx, cx = self.lstm(x)
 
         x = hx
+        
+        actor = self.actor_linear(x)
+        logits = self.logsoftmax(actor)
 
-        return self.critic_linear(x), self.actor_linear(x), (hx, cx)
+        dist = Categorical(logits = logits)
+        value = self.critic_linear(x)
+
+        return dist, value
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        weight_shape = list(m.weight.data.size())
+        fan_in = np.prod(weight_shape[1:4])
+        fan_out = np.prod(weight_shape[2:4]) * weight_shape[0]
+        w_bound = np.sqrt(6. / (fan_in + fan_out))
+        m.weight.data.uniform_(-w_bound, w_bound)
+        m.bias.data.fill_(0)
+    elif classname.find('Linear') != -1:
+        weight_shape = list(m.weight.data.size())
+        fan_in = weight_shape[1]
+        fan_out = weight_shape[0]
+        w_bound = np.sqrt(6. / (fan_in + fan_out))
+        m.weight.data.uniform_(-w_bound, w_bound)
+        m.bias.data.fill_(0)
+
+def norm_col_init(weights, std=1.0):
+    x = torch.randn(weights.size())
+    x *= std / torch.sqrt((x**2).sum(1, keepdim=True))
+    return x

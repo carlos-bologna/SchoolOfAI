@@ -14,7 +14,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.distributions import Normal
 from tensorboardX import SummaryWriter
 
 from lib.common import mkdir
@@ -53,7 +52,7 @@ def setup(env_id):
         NUM_INPUTS      = data.setdefault('num_inputs', 26)
         NUM_OUTPUTS     = data.setdefault('num_outputs', 6)
         NUM_ENVS        = data.setdefault('num_envs', 1)
-        HIDDEN_SIZE     = data.setdefault('hidden_size', 256)
+        HIDDEN_SIZE     = data.get('hidden_size', 256)
         LEARNING_RATE   = data.setdefault('learning_rate', 1e-4)
         GAMMA           = data.setdefault('gamma', 0.99)
         GAE_LAMBDA      = data.setdefault('gae_lambda', 0.95)
@@ -91,8 +90,15 @@ def test_env(env, model, device, deterministic=True):
     while not done:
         state = torch.FloatTensor(state).unsqueeze(0).to(device)
         dist, _ = model(state)
-        action = dist.mean.detach().cpu().numpy()[0] if deterministic \
-            else dist.sample().cpu().numpy()[0]
+
+        if isinstance(dist, torch.distributions.categorical.Categorical):
+            action = np.argmax(dist.probs.detach().cpu().numpy()) if deterministic \
+                else int(m.sample().cpu().numpy())
+
+        elif isinstance(dist, torch.distributions.normal.Normal):
+            action = dist.mean.detach().cpu().numpy()[0] if deterministic \
+                else dist.sample().cpu().numpy()[0]
+        
         next_state, reward, done, _ = env.step(action)
         state = next_state
         total_reward += reward
@@ -198,7 +204,7 @@ if __name__ == "__main__":
     num_outputs = NUM_OUTPUTS #envs.action_space
 
     model_class = getattr(models, MODEL_NAME)
-    model = model_class(num_inputs, num_outputs, HIDDEN_SIZE).to(device)
+    model = model_class(num_inputs, num_outputs, hidden_size=HIDDEN_SIZE).to(device)
     print(model)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
@@ -250,6 +256,13 @@ if __name__ == "__main__":
         actions = torch.cat(actions)
         advantage = returns - values
         advantage = normalize(advantage)
+
+        # For Categorical distribution
+        if len(log_probs.size()) == 1:
+            log_probs = log_probs.unsqueeze(dim=1)
+
+        if len(actions.size()) == 1:
+            actions = actions.unsqueeze(dim=1)
 
         ppo_update(frame_idx, states, actions, log_probs, returns, advantage, PPO_EPSILON)
         train_epoch += 1
