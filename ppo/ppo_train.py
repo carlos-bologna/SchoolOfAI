@@ -19,8 +19,8 @@ from tensorboardX import SummaryWriter
 from lib.common import mkdir
 #from lib.model import ActorCritic
 import lib.model as models
+import lib.transforms as transforms
 from lib.multiprocessing_env import SubprocVecEnv
-
 
 def setup(env_id):
 
@@ -47,6 +47,9 @@ def setup(env_id):
         global NUM_TESTS
         global TARGET_REWARD
         global MODEL_NAME
+        global MODEL_CLASS
+        global TRANSFORM_NAME
+        global TRANSFORM_CLASS
 
         ENV_ID          = data.setdefault('env_id', 'RoboschoolHalfCheetah-v1')
         NUM_INPUTS      = data.setdefault('num_inputs', 26)
@@ -66,6 +69,9 @@ def setup(env_id):
         NUM_TESTS       = data.setdefault('num_tests', 10)
         TARGET_REWARD   = data.setdefault('target_reward', 2500)
         MODEL_NAME      = data.setdefault('model_name', 'ActorCritic')
+        MODEL_CLASS     = getattr(models, MODEL_NAME)
+        TRANSFORM_NAME  = data.setdefault('transform_name', 'Identity')
+        TRANSFORM_CLASS = getattr(transforms, TRANSFORM_NAME)
 
         # Transformations
         if isinstance(NUM_INPUTS, list): NUM_INPUTS = tuple(NUM_INPUTS)
@@ -75,13 +81,14 @@ def setup(env_id):
         json_file.truncate()  # clear any tail of old content
 
 
-def make_env(env_id):
+def make_env(env_id, transform=None):
     # returns a function which creates a single environment
     def _thunk():
         env = gym.make(env_id)
+        if transform:
+            env = transform(env)
         return env
     return _thunk
-
 
 def test_env(env, model, device, deterministic=True):
     state = env.reset()
@@ -197,14 +204,13 @@ if __name__ == "__main__":
     print('Device:', device)
 
     # Prepare environments
-    envs = [make_env(ENV_ID) for i in range(NUM_ENVS)]
+    envs = [make_env(ENV_ID, TRANSFORM_CLASS) for i in range(NUM_ENVS)]
     envs = SubprocVecEnv(envs)
     env = gym.make(ENV_ID)
     num_inputs = NUM_INPUTS #envs.observation_space
     num_outputs = NUM_OUTPUTS #envs.action_space
 
-    model_class = getattr(models, MODEL_NAME)
-    model = model_class(num_inputs, num_outputs, hidden_size=HIDDEN_SIZE).to(device)
+    model = MODEL_CLASS(num_inputs, num_outputs, hidden_size=HIDDEN_SIZE).to(device)
     print(model)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
