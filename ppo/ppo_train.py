@@ -90,7 +90,7 @@ def make_env(env_id, transform=None):
         return env
     return _thunk
 
-def test_env(env, model, device, deterministic=True):
+def test_env(env, model, device, deterministic=False):
     state = env.reset()
     done = False
     total_reward = 0
@@ -100,7 +100,7 @@ def test_env(env, model, device, deterministic=True):
 
         if isinstance(dist, torch.distributions.categorical.Categorical):
             action = np.argmax(dist.probs.detach().cpu().numpy()) if deterministic \
-                else int(m.sample().cpu().numpy())
+                else int(dist.sample().cpu().numpy())
 
         elif isinstance(dist, torch.distributions.normal.Normal):
             action = dist.mean.detach().cpu().numpy()[0] if deterministic \
@@ -148,7 +148,7 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
     sum_entropy = 0.0
     sum_loss_total = 0.0
 
-    # PPO EPOCHS is the number of times we will go through ALL the training data to make updates
+    # PPO EPOCHS is the number of times we will go through ALL the training data to make updates    
     for _ in range(PPO_EPOCHS):
         # grabs random mini-batches several times until we have covered all data
         for state, action, old_log_probs, return_, advantage in ppo_iter(states, actions, log_probs, returns, advantages):
@@ -187,7 +187,6 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
     writer.add_scalar("entropy", sum_entropy / count_steps, frame_idx)
     writer.add_scalar("loss_total", sum_loss_total / count_steps, frame_idx)
 
-
 if __name__ == "__main__":
     mkdir('.', 'checkpoints')
     parser = argparse.ArgumentParser()
@@ -206,7 +205,11 @@ if __name__ == "__main__":
     # Prepare environments
     envs = [make_env(ENV_ID, TRANSFORM_CLASS) for i in range(NUM_ENVS)]
     envs = SubprocVecEnv(envs)
+    
     env = gym.make(ENV_ID)
+    if TRANSFORM_CLASS:
+        env = TRANSFORM_CLASS(env)
+
     num_inputs = NUM_INPUTS #envs.observation_space
     num_outputs = NUM_OUTPUTS #envs.action_space
 
@@ -274,6 +277,7 @@ if __name__ == "__main__":
         train_epoch += 1
 
         if train_epoch % TEST_EPOCHS == 0:
+            print('Testing...')
             test_reward = np.mean([test_env(env, model, device)
                                    for _ in range(NUM_TESTS)])
             writer.add_scalar("test_rewards", test_reward, frame_idx)

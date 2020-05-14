@@ -35,9 +35,9 @@ class ActorCriticLSTM(nn.Module):
     def __init__(self, num_inputs, num_outputs, **kwargs):
         super(ActorCriticLSTM, self).__init__()
 
-        self.channels_first = kwargs.get('channels_first', False)
-        
-        in_channels = num_inputs[0] if self.channels_first else num_inputs[2]
+        #self.channels_first = kwargs.get('channels_first', False)
+        #in_channels = num_inputs[0] if self.channels_first else num_inputs[2]
+        in_channels = num_inputs[0]
 
         self.conv1 = nn.Conv2d(in_channels, 32, 5, stride=1, padding=2)
         self.maxp1 = nn.MaxPool2d(2, 2)
@@ -48,8 +48,7 @@ class ActorCriticLSTM(nn.Module):
         self.conv4 = nn.Conv2d(64, 64, 3, stride=1, padding=1)
         self.maxp4 = nn.MaxPool2d(2, 2)
 
-        #self.lstm = nn.LSTMCell(1024, 512)
-        self.lstm = nn.LSTMCell(6912, 512)
+        self.lstm = nn.LSTMCell(1024, 512)
         
         self.critic_linear = nn.Linear(512, 1)
         self.actor_linear = nn.Linear(512, num_outputs)
@@ -76,8 +75,8 @@ class ActorCriticLSTM(nn.Module):
 
     def forward(self, inputs):
 
-        if not self.channels_first:
-            inputs = inputs.permute(0,3,1,2) #make channel as first position (after batch)
+        #if not self.channels_first:
+        #    inputs = inputs.permute(0,3,1,2) #make channel as first position (after batch)
         
         x = F.relu(self.maxp1(self.conv1(inputs)))
         x = F.relu(self.maxp2(self.conv2(x)))

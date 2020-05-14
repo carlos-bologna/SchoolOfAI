@@ -1,1 +1,24 @@
-{"env_id": "BreakoutDeterministic-v4", "num_inputs": [210, 160, 3], "num_outputs": 4, "num_envs": 8, "learning_rate": 0.0001, "gamma": 0.99, "gae_lambda": 0.95, "ppo_epsilon": 0.2, "critic_discount": 0.5, "entropy_beta": 0.0, "ppo_steps": 8, "mini_batch_size": 8, "ppo_epochs": 10, "test_epochs": 10, "num_tests": 10, "target_reward": 2500, "model_name": "ActorCriticLSTM", "hidden_size": 256, "transform_name": "Transform_Atari"}
+{
+    "env_id": "BreakoutDeterministic-v4",
+    "num_inputs": [
+        1,
+        80,
+        80
+    ],
+    "num_outputs": 4,
+    "num_envs": 8,
+    "learning_rate": 0.0001,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "ppo_epsilon": 0.2,
+    "critic_discount": 0.5,
+    "entropy_beta": 0.0,
+    "ppo_steps": 256,
+    "mini_batch_size": 256,
+    "ppo_epochs": 10,
+    "test_epochs": 10,
+    "num_tests": 10,
+    "target_reward": 2500,
+    "model_name": "ActorCriticLSTM",
+    "transform_name": "Transform_Atari"
+}
