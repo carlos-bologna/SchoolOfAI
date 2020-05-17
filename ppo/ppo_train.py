@@ -61,7 +61,7 @@ def setup(env_id):
         GAE_LAMBDA      = data.setdefault('gae_lambda', 0.95)
         PPO_EPSILON     = data.setdefault('ppo_epsilon', 0.2)
         CRITIC_DISCOUNT = data.setdefault('critic_discount', 0.5)
-        ENTROPY_BETA    = data.setdefault('entropy_beta', 0.00)
+        ENTROPY_BETA    = data.setdefault('entropy_beta', 0.001)
         PPO_STEPS       = data.setdefault('ppo_steps', 256)
         MINI_BATCH_SIZE = data.setdefault('mini_batch_size', 64)
         PPO_EPOCHS      = data.setdefault('ppo_epochs', 10)
