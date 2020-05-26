@@ -8,7 +8,7 @@ import numpy as np
 import json
 
 # Follow instructions here to install https://github.com/openai/roboschool
-import roboschool
+#import roboschool
 
 import torch
 import torch.nn as nn
@@ -276,7 +276,6 @@ if __name__ == "__main__":
         train_epoch += 1
 
         if train_epoch % TEST_EPOCHS == 0:
-            print('Testing...')
             test_reward = np.mean([test_env(env, model, device)
                                    for _ in range(NUM_TESTS)])
             writer.add_scalar("test_rewards", test_reward, frame_idx)
