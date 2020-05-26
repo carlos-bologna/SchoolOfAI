@@ -14,10 +14,10 @@
     "critic_discount": 0.5,
     "entropy_beta": 0.001,
     "ppo_steps": 256,
-    "mini_batch_size": 128,
+    "mini_batch_size": 32,
     "ppo_epochs": 10,
     "test_epochs": 10,
-    "num_tests": 10,
+    "num_tests": 3,
     "target_reward": 500,
     "model_name": "ActorCriticLSTM",
     "transform_name": "Transform_Atari"

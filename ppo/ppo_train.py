@@ -21,6 +21,7 @@ from lib.common import mkdir
 import lib.model as models
 import lib.transforms as transforms
 from lib.multiprocessing_env import SubprocVecEnv
+from lib.environment import atari_env
 
 def setup(env_id):
 
@@ -81,16 +82,15 @@ def setup(env_id):
         json_file.truncate()  # clear any tail of old content
 
 
-def make_env(env_id, transform=None):
+def make_env(env_id):
     # returns a function which creates a single environment
     def _thunk():
-        env = gym.make(env_id)
-        if transform:
-            env = transform(env)
+        #env = gym.make(env_id)
+        env = atari_env(env_id)
         return env
     return _thunk
 
-def test_env(env, model, device, deterministic=False):
+def test_env(env, model, device, deterministic=True):
     state = env.reset()
     done = False
     total_reward = 0
@@ -154,7 +154,8 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
         for state, action, old_log_probs, return_, advantage in ppo_iter(states, actions, log_probs, returns, advantages):
             dist, value = model(state)
             entropy = dist.entropy().mean()
-            new_log_probs = dist.log_prob(action)
+            #new_log_probs = dist.log_prob(action)
+            new_log_probs = dist.log_prob(action.squeeze()).unsqueeze(dim=1)
 
             ratio = (new_log_probs - old_log_probs).exp()
             surr1 = ratio * advantage
@@ -203,13 +204,11 @@ if __name__ == "__main__":
     print('Device:', device)
 
     # Prepare environments
-    envs = [make_env(ENV_ID, TRANSFORM_CLASS) for i in range(NUM_ENVS)]
+    envs = [make_env(ENV_ID) for i in range(NUM_ENVS)]
     envs = SubprocVecEnv(envs)
     
-    env = gym.make(ENV_ID)
-    if TRANSFORM_CLASS:
-        env = TRANSFORM_CLASS(env)
-
+    env = atari_env(ENV_ID)
+    
     num_inputs = NUM_INPUTS #envs.observation_space
     num_outputs = NUM_OUTPUTS #envs.action_space
 
