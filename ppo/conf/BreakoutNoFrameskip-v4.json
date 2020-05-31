@@ -1,5 +1,5 @@
 {
-    "env_id": "BreakoutDeterministic-v4",
+    "env_id": "BreakoutNoFrameskip-v4",
     "num_inputs": [
         1,
         80,

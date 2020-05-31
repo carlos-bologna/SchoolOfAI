@@ -19,68 +19,9 @@ from tensorboardX import SummaryWriter
 from lib.common import mkdir
 #from lib.model import ActorCritic
 import lib.model as models
-import lib.transforms as transforms
 from lib.multiprocessing_env import SubprocVecEnv
 from lib.environment import atari_env
-
-def setup(env_id):
-
-    # open read and overwrite.
-    with open(os.path.join('conf', env_id + '.json'), 'r+') as json_file:
-
-        data = json.load(json_file)
-
-        global ENV_ID
-        global NUM_INPUTS
-        global NUM_OUTPUTS
-        global NUM_ENVS
-        global HIDDEN_SIZE
-        global LEARNING_RATE
-        global GAMMA
-        global GAE_LAMBDA
-        global PPO_EPSILON
-        global CRITIC_DISCOUNT
-        global ENTROPY_BETA
-        global PPO_STEPS
-        global MINI_BATCH_SIZE
-        global PPO_EPOCHS
-        global TEST_EPOCHS
-        global NUM_TESTS
-        global TARGET_REWARD
-        global MODEL_NAME
-        global MODEL_CLASS
-        global TRANSFORM_NAME
-        global TRANSFORM_CLASS
-
-        ENV_ID          = data.setdefault('env_id', 'RoboschoolHalfCheetah-v1')
-        NUM_INPUTS      = data.setdefault('num_inputs', 26)
-        NUM_OUTPUTS     = data.setdefault('num_outputs', 6)
-        NUM_ENVS        = data.setdefault('num_envs', 1)
-        HIDDEN_SIZE     = data.get('hidden_size', 256)
-        LEARNING_RATE   = data.setdefault('learning_rate', 1e-4)
-        GAMMA           = data.setdefault('gamma', 0.99)
-        GAE_LAMBDA      = data.setdefault('gae_lambda', 0.95)
-        PPO_EPSILON     = data.setdefault('ppo_epsilon', 0.2)
-        CRITIC_DISCOUNT = data.setdefault('critic_discount', 0.5)
-        ENTROPY_BETA    = data.setdefault('entropy_beta', 0.001)
-        PPO_STEPS       = data.setdefault('ppo_steps', 256)
-        MINI_BATCH_SIZE = data.setdefault('mini_batch_size', 64)
-        PPO_EPOCHS      = data.setdefault('ppo_epochs', 10)
-        TEST_EPOCHS     = data.setdefault('test_epochs', 10)
-        NUM_TESTS       = data.setdefault('num_tests', 10)
-        TARGET_REWARD   = data.setdefault('target_reward', 2500)
-        MODEL_NAME      = data.setdefault('model_name', 'ActorCritic')
-        MODEL_CLASS     = getattr(models, MODEL_NAME)
-        TRANSFORM_NAME  = data.setdefault('transform_name', 'Identity')
-        TRANSFORM_CLASS = getattr(transforms, TRANSFORM_NAME)
-
-        # Transformations
-        if isinstance(NUM_INPUTS, list): NUM_INPUTS = tuple(NUM_INPUTS)
-
-        json_file.seek(0)  # go to beggining of file
-        json.dump(data, json_file)  # write content
-        json_file.truncate()  # clear any tail of old content
-
+from lib.config import setup
 
 def make_env(env_id):
     # returns a function which creates a single environment
@@ -111,12 +52,10 @@ def test_env(env, model, device, deterministic=True):
         total_reward += reward
     return total_reward
 
-
 def normalize(x):
     x -= x.mean()
     x /= (x.std() + 1e-8)
     return x
-
 
 def compute_gae(next_value, rewards, masks, values, gamma=0.99, lam=0.95):
     values = values + [next_value]
@@ -130,16 +69,16 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, lam=0.95):
         returns.insert(0, gae + values[step])
     return returns
 
-
-def ppo_iter(states, actions, log_probs, returns, advantage):
+def ppo_iter(states, actions, log_probs, returns, advantage, mini_batch_size):
     batch_size = states.size(0)
     # generates random mini-batches until we have covered the full batch
-    for _ in range(batch_size // MINI_BATCH_SIZE):
-        rand_ids = np.random.randint(0, batch_size, MINI_BATCH_SIZE)
+    for _ in range(batch_size // mini_batch_size):
+        rand_ids = np.random.randint(0, batch_size, mini_batch_size)
         yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
 
+def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_param, 
+    epochs, mini_batch_size, critic_discount, entropy_beta):
 
-def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_param=0.2):
     count_steps = 0
     sum_returns = 0.0
     sum_advantage = 0.0
@@ -149,9 +88,9 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
     sum_loss_total = 0.0
 
     # PPO EPOCHS is the number of times we will go through ALL the training data to make updates    
-    for _ in range(PPO_EPOCHS):
+    for _ in range(epochs):
         # grabs random mini-batches several times until we have covered all data
-        for state, action, old_log_probs, return_, advantage in ppo_iter(states, actions, log_probs, returns, advantages):
+        for state, action, old_log_probs, return_, advantage in ppo_iter(states, actions, log_probs, returns, advantages, mini_batch_size):
             dist, value = model(state)
             entropy = dist.entropy().mean()
             #new_log_probs = dist.log_prob(action)
@@ -165,7 +104,7 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
             actor_loss = - torch.min(surr1, surr2).mean()
             critic_loss = (return_ - value).pow(2).mean()
 
-            loss = CRITIC_DISCOUNT * critic_loss + actor_loss - ENTROPY_BETA * entropy
+            loss = critic_discount * critic_loss + actor_loss - entropy_beta * entropy
 
             optimizer.zero_grad()
             loss.backward()
@@ -194,9 +133,9 @@ if __name__ == "__main__":
     parser.add_argument("-e", "--env", default="RoboschoolHalfCheetah-v1", help="Name of the environment")
     args = parser.parse_args()
     # Setup all constant
-    setup(args.env)
+    conf = setup(args.env)
 
-    writer = SummaryWriter(comment="ppo_" + ENV_ID)
+    writer = SummaryWriter(comment="ppo_" + conf.ENV_ID)
 
     # Autodetect CUDA
     use_cuda = torch.cuda.is_available()
@@ -204,17 +143,17 @@ if __name__ == "__main__":
     print('Device:', device)
 
     # Prepare environments
-    envs = [make_env(ENV_ID) for i in range(NUM_ENVS)]
+    envs = [make_env(conf.ENV_ID) for i in range(conf.NUM_ENVS)]
     envs = SubprocVecEnv(envs)
     
-    env = atari_env(ENV_ID)
+    env = atari_env(conf.ENV_ID)
     
-    num_inputs = NUM_INPUTS #envs.observation_space
-    num_outputs = NUM_OUTPUTS #envs.action_space
+    num_inputs = conf.NUM_INPUTS #envs.observation_space
+    num_outputs = conf.NUM_OUTPUTS #envs.action_space
 
-    model = MODEL_CLASS(num_inputs, num_outputs, hidden_size=HIDDEN_SIZE).to(device)
+    model = conf.MODEL_CLASS(num_inputs, num_outputs, hidden_size=conf.HIDDEN_SIZE).to(device)
     print(model)
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = optim.Adam(model.parameters(), lr=conf.LEARNING_RATE)
 
     frame_idx = 0
     train_epoch = 0
@@ -232,7 +171,7 @@ if __name__ == "__main__":
         rewards = []
         masks = []
 
-        for _ in range(PPO_STEPS):
+        for _ in range(conf.PPO_STEPS):
             state = torch.FloatTensor(state).to(device)
             dist, value = model(state)
 
@@ -255,7 +194,7 @@ if __name__ == "__main__":
         next_state = torch.FloatTensor(next_state).to(device)
         _, next_value = model(next_state)
         returns = compute_gae(next_value, rewards, masks,
-                              values, GAMMA, GAE_LAMBDA)
+                              values, conf.GAMMA, conf.GAE_LAMBDA)
 
         returns = torch.cat(returns).detach()
         log_probs = torch.cat(log_probs).detach()
@@ -272,12 +211,14 @@ if __name__ == "__main__":
         if len(actions.size()) == 1:
             actions = actions.unsqueeze(dim=1)
 
-        ppo_update(frame_idx, states, actions, log_probs, returns, advantage, PPO_EPSILON)
+        ppo_update(frame_idx, states, actions, log_probs, returns, advantage,
+            conf.PPO_EPSILON, conf.PPO_EPOCHS, conf.MINI_BATCH_SIZE, conf.CRITIC_DISCOUNT, conf.ENTROPY_BETA)
+        
         train_epoch += 1
 
-        if train_epoch % TEST_EPOCHS == 0:
+        if train_epoch % conf.TEST_EPOCHS == 0:
             test_reward = np.mean([test_env(env, model, device)
-                                   for _ in range(NUM_TESTS)])
+                                   for _ in range(conf.NUM_TESTS)])
             writer.add_scalar("test_rewards", test_reward, frame_idx)
             print('Frame %s. reward: %s' % (frame_idx, test_reward))
             # Save a checkpoint every time we achieve a best reward
@@ -285,10 +226,10 @@ if __name__ == "__main__":
                 if best_reward is not None:
                     print("Best reward updated: %.3f -> %.3f" %
                           (best_reward, test_reward))
-                    name = "%s_best_%+.3f_%d.dat" % (ENV_ID,
+                    name = "%s_best_%+.3f_%d.dat" % (conf.ENV_ID,
                                                      test_reward, frame_idx)
                     fname = os.path.join('.', 'checkpoints', name)
-                    torch.save(model.state_dict(), fname)
+                    #torch.save(model.state_dict(), fname)
                 best_reward = test_reward
-            if test_reward > TARGET_REWARD:
+            if test_reward > conf.TARGET_REWARD:
                 early_stop = True

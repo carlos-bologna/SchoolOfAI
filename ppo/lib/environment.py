@@ -17,18 +17,20 @@ env_conf = {
   }
 
 def atari_env(env_id, env_conf=env_conf, args=None):
+    max_episode_length = 100000
+    skip_rate = 4
     env = gym.make(env_id)
     if 'NoFrameskip' in env_id:
         assert 'NoFrameskip' in env.spec.id
-        #env._max_episode_steps = args.max_episode_length * args.skip_rate
+        env._max_episode_steps = max_episode_length * skip_rate
         env = NoopResetEnv(env, noop_max=30)
-        #env = MaxAndSkipEnv(env, skip=args.skip_rate)
-    #else:
-        #env._max_episode_steps = args.max_episode_length
+        env = MaxAndSkipEnv(env, skip=skip_rate)
+    else:
+        env._max_episode_steps = max_episode_length
     env = EpisodicLifeEnv(env)
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
-    #env._max_episode_steps = args.max_episode_length
+    env._max_episode_steps = max_episode_length
     env = AtariRescale(env, env_conf)
     env = NormalizedEnv(env)
     return env
@@ -112,7 +114,7 @@ class FireResetEnv(gym.Wrapper):
         gym.Wrapper.__init__(self, env)
         assert env.unwrapped.get_action_meanings()[1] == 'FIRE'
         assert len(env.unwrapped.get_action_meanings()) >= 3
-
+        
     def reset(self, **kwargs):
         self.env.reset(**kwargs)
         obs, _, done, _ = self.env.step(1)
