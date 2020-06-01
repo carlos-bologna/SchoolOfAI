@@ -52,6 +52,7 @@ def test_env(env, model, device, deterministic=True):
         total_reward += reward
     return total_reward
 
+
 def normalize(x):
     x -= x.mean()
     x /= (x.std() + 1e-8)
@@ -70,14 +71,14 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, lam=0.95):
     return returns
 
 def ppo_iter(states, actions, log_probs, returns, advantage, mini_batch_size):
-    batch_size = states.size(0)
+    batch_size = states.shape[0]
     # generates random mini-batches until we have covered the full batch
     for _ in range(batch_size // mini_batch_size):
         rand_ids = np.random.randint(0, batch_size, mini_batch_size)
         yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
 
 def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_param, 
-    epochs, mini_batch_size, critic_discount, entropy_beta):
+    epochs, mini_batch_size, critic_discount, entropy_beta, device):
 
     count_steps = 0
     sum_returns = 0.0
@@ -91,7 +92,15 @@ def ppo_update(frame_idx, states, actions, log_probs, returns, advantages, clip_
     for _ in range(epochs):
         # grabs random mini-batches several times until we have covered all data
         for state, action, old_log_probs, return_, advantage in ppo_iter(states, actions, log_probs, returns, advantages, mini_batch_size):
+            
+            state = torch.FloatTensor(state).to(device)
+            action = torch.FloatTensor(action).to(device)
+            old_log_probs = torch.FloatTensor(old_log_probs).to(device)
+            advantage = torch.FloatTensor(advantage).to(device)
+            return_ = torch.FloatTensor(return_).to(device)
+
             dist, value = model(state)
+            
             entropy = dist.entropy().mean()
             #new_log_probs = dist.log_prob(action)
             new_log_probs = dist.log_prob(action.squeeze()).unsqueeze(dim=1)
@@ -174,45 +183,52 @@ if __name__ == "__main__":
         for _ in range(conf.PPO_STEPS):
             state = torch.FloatTensor(state).to(device)
             dist, value = model(state)
-
+            
             action = dist.sample()
+            
             # each state, reward, done is a list of results from each parallel environment
             next_state, reward, done, _ = envs.step(action.cpu().numpy())
+            
             log_prob = dist.log_prob(action)
 
-            log_probs.append(log_prob)
-            values.append(value)
-            rewards.append(torch.FloatTensor(reward).unsqueeze(1).to(device))
-            masks.append(torch.FloatTensor(1 - done).unsqueeze(1).to(device))
-
-            states.append(state)
-            actions.append(action)
+            # Save Episodes
+            log_probs.append(log_prob.cpu().detach().numpy())
+            values.append(value.cpu().detach().numpy())
+            rewards.append(np.expand_dims(reward, 1))
+            masks.append(np.expand_dims(1-done, 1))
+            states.append(state.cpu().detach().numpy())
+            actions.append(action.cpu().detach().numpy())
 
             state = next_state
             frame_idx += 1
 
         next_state = torch.FloatTensor(next_state).to(device)
         _, next_value = model(next_state)
-        returns = compute_gae(next_value, rewards, masks,
-                              values, conf.GAMMA, conf.GAE_LAMBDA)
 
-        returns = torch.cat(returns).detach()
-        log_probs = torch.cat(log_probs).detach()
-        values = torch.cat(values).detach()
-        states = torch.cat(states)
-        actions = torch.cat(actions)
-        advantage = returns - values
-        advantage = normalize(advantage)
+        next_state = next_state.cpu().numpy()
+        next_value = next_value.cpu().detach().numpy()
+
+        returns = compute_gae(next_value, rewards, masks, values, conf.GAMMA, conf.GAE_LAMBDA)
+
+        # Flat list of list
+        returns = np.concatenate(returns)
+        log_probs = np.concatenate(log_probs)
+        values = np.concatenate(values)
+        states = np.concatenate(states)
+        actions = np.concatenate(actions)
+
+        advantages = returns - values
+        advantages = normalize(advantages)
 
         # For Categorical distribution
-        if len(log_probs.size()) == 1:
-            log_probs = log_probs.unsqueeze(dim=1)
+        if len(log_probs.shape) == 1:
+            log_probs = np.expand_dims(log_probs, 1)
 
-        if len(actions.size()) == 1:
-            actions = actions.unsqueeze(dim=1)
+        if len(actions.shape) == 1:
+            actions = np.expand_dims(actions, 1)
 
-        ppo_update(frame_idx, states, actions, log_probs, returns, advantage,
-            conf.PPO_EPSILON, conf.PPO_EPOCHS, conf.MINI_BATCH_SIZE, conf.CRITIC_DISCOUNT, conf.ENTROPY_BETA)
+        ppo_update(frame_idx, states, actions, log_probs, returns, advantages,
+            conf.PPO_EPSILON, conf.PPO_EPOCHS, conf.MINI_BATCH_SIZE, conf.CRITIC_DISCOUNT, conf.ENTROPY_BETA, device)
         
         train_epoch += 1
 
@@ -229,7 +245,7 @@ if __name__ == "__main__":
                     name = "%s_best_%+.3f_%d.dat" % (conf.ENV_ID,
                                                      test_reward, frame_idx)
                     fname = os.path.join('.', 'checkpoints', name)
-                    #torch.save(model.state_dict(), fname)
+                    torch.save(model.state_dict(), fname)
                 best_reward = test_reward
             if test_reward > conf.TARGET_REWARD:
                 early_stop = True

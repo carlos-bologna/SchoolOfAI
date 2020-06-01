@@ -20,6 +20,7 @@ def atari_env(env_id, env_conf=env_conf, args=None):
     max_episode_length = 100000
     skip_rate = 4
     env = gym.make(env_id)
+    
     if 'NoFrameskip' in env_id:
         assert 'NoFrameskip' in env.spec.id
         env._max_episode_steps = max_episode_length * skip_rate
@@ -30,11 +31,35 @@ def atari_env(env_id, env_conf=env_conf, args=None):
     env = EpisodicLifeEnv(env)
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
-    env._max_episode_steps = max_episode_length
+
     env = AtariRescale(env, env_conf)
     env = NormalizedEnv(env)
     return env
 
+def atari_env_test(env_id, env_conf=env_conf, record=None):
+    max_episode_length = 100000
+    skip_rate = 4
+
+    env = gym.make(env_id)
+    
+    if 'NoFrameskip' in env_id:
+        assert 'NoFrameskip' in env.spec.id
+        env._max_episode_steps = max_episode_length * skip_rate
+        env = NoopResetEnv(env, noop_max=30)
+        env = MaxAndSkipEnv(env, skip=skip_rate)
+    else:
+        env._max_episode_steps = max_episode_length
+
+    env = EpisodicLifeEnv(env)
+    if 'FIRE' in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+
+    if record:
+        env = gym.wrappers.Monitor(env, record, video_callable=lambda episode_id: True,force=True)
+
+    env = AtariRescale(env, env_conf)
+    env = NormalizedEnv(env)
+    return env
 
 def process_frame(frame, conf):
     frame = frame[conf["crop1"]:conf["crop2"] + 160, :160]
@@ -106,7 +131,6 @@ class NoopResetEnv(gym.Wrapper):
 
     def step(self, ac):
         return self.env.step(ac)
-
 
 class FireResetEnv(gym.Wrapper):
     def __init__(self, env):

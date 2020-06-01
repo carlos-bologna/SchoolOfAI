@@ -1,6 +1,6 @@
 import argparse
 import gym
-from lib.environment import atari_env
+from lib.environment import atari_env_test
 #import roboschool
 
 from lib.model import ActorCritic
@@ -30,10 +30,10 @@ if __name__ == "__main__":
     device   = torch.device("cuda" if use_cuda else "cpu")
 
     #env = gym.make(args.env)
-    env = atari_env(conf.ENV_ID)
+    env = atari_env_test(conf.ENV_ID, record=args.record)
 
-    if args.record:
-        env = gym.wrappers.Monitor(env, args.record, force=True)
+    #if args.record:
+    #    env = gym.wrappers.Monitor(env, args.record, force=True)
 
     num_inputs = conf.NUM_INPUTS #envs.observation_space
     num_outputs = conf.NUM_OUTPUTS #envs.action_space
@@ -47,7 +47,8 @@ if __name__ == "__main__":
     done = False
     total_steps = 0
     total_reward = 0
-    while not done:
+    real_done = False
+    while not real_done:
         state = torch.FloatTensor(state).unsqueeze(0).to(device)
         dist, _ = model(state)
         if isinstance(dist, torch.distributions.categorical.Categorical):
@@ -57,10 +58,17 @@ if __name__ == "__main__":
         elif isinstance(dist, torch.distributions.normal.Normal):
             action = dist.mean.detach().cpu().numpy()[0] if deterministic \
                 else dist.sample().cpu().numpy()[0]
-        next_state, reward, done, _ = env.step(action)
-        state = next_state
+        next_state, reward, done, real_done = env.step(action)
+
+        if done:
+            state = env.reset()
+        else:
+            state = next_state
+
         total_reward += reward
         total_steps += 1
-
+    
     env.env.close()
     print("In %d steps we got %.3f reward" % (total_steps, total_reward))
+
+    
